@@ -345,7 +345,7 @@ class TranscriptionTeeClient:
             self.process_hls_stream(hls_url, save_file)
         elif audio is not None:
             resampled_file = utils.resample(audio)
-            # self.play_file(resampled_file)
+            self.play_file(resampled_file)
         elif rtsp_url is not None:
             self.process_rtsp_stream(rtsp_url)
         else:
@@ -390,45 +390,40 @@ class TranscriptionTeeClient:
 
         # read audio and create pyaudio stream
         with wave.open(filename, "rb") as wavfile:
-            self.stream = self.p.open(
-                format=self.p.get_format_from_width(wavfile.getsampwidth()),
-                channels=wavfile.getnchannels(),
-                rate=wavfile.getframerate(),
-                input=True,
-                output=True,
-                frames_per_buffer=self.chunk,
-            )
-            chunk_duration = self.chunk / float(wavfile.getframerate())
-            try:
-                while any(client.recording for client in self.clients):
-                    data = wavfile.readframes(self.chunk)
-                    if data == b"":
-                        break
+        self.stream = self.p.open(
+            format=self.p.get_format_from_width(wavfile.getsampwidth()),
+            channels=wavfile.getnchannels(),
+            rate=wavfile.getframerate(),
+            input=True,
+            frames_per_buffer=self.chunk,
+        )
+        try:
+            while any(client.recording for client in self.clients):
+                data = wavfile.readframes(self.chunk)
+                if data == b"":
+                    break
 
-                    audio_array = self.bytes_to_float_array(data)
-                    self.multicast_packet(audio_array.tobytes())
-                    if self.mute_audio_playback:
-                        time.sleep(chunk_duration)
-                    else:
-                        self.stream.write(data)
+                audio_array = self.bytes_to_float_array(data)
+                self.multicast_packet(audio_array.tobytes())
+                time.sleep(self.chunk / float(wavfile.getframerate()))
     
-                wavfile.close()
+            wavfile.close()
 
-                for client in self.clients:
-                    client.wait_before_disconnect()
-                self.multicast_packet(Client.END_OF_AUDIO.encode('utf-8'), True)
-                self.write_all_clients_srt()
-                self.stream.close()
-                self.close_all_clients()
+            for client in self.clients:
+                client.wait_before_disconnect()
+            self.multicast_packet(Client.END_OF_AUDIO.encode('utf-8'), True)
+            self.write_all_clients_srt()
+            self.stream.close()
+            self.close_all_clients()
 
-            except KeyboardInterrupt:
-                wavfile.close()
-                self.stream.stop_stream()
-                self.stream.close()
-                self.p.terminate()
-                self.close_all_clients()
-                self.write_all_clients_srt()
-                print("[INFO]: Keyboard interrupt.")
+        except KeyboardInterrupt:
+            wavfile.close()
+            self.stream.stop_stream()
+            self.stream.close()
+            self.p.terminate()
+            self.close_all_clients()
+            self.write_all_clients_srt()
+            print("[INFO]: Keyboard interrupt.")
 
     def process_rtsp_stream(self, rtsp_url):
         """
